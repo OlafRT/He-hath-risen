@@ -62,6 +62,11 @@ public class TombIntro : MonoBehaviour
         StartCoroutine(IntroSequence());
     }
 
+    void OnDestroy()
+    {
+        GamepadRumble.Stop();
+    }
+
     IEnumerator IntroSequence()
     {
         yield return new WaitForSeconds(prePause);
@@ -70,7 +75,10 @@ public class TombIntro : MonoBehaviour
 
         yield return RollRock();
 
+        // Thud impact — short strong pulse, then fade out
         PlaySound(rockThudSFX);
+        yield return RumbleThud(0.55f, 0.22f, 0.35f);
+
         StartParticles(openingDust);
         StartParticles(openingDebris);
 
@@ -78,7 +86,6 @@ public class TombIntro : MonoBehaviour
         yield return Fade(introPanel, 0f, 1f, textFadeIn);
         yield return new WaitForSeconds(textHold);
         yield return Fade(introPanel, 1f, 0f, textFadeOut);
-
     }
 
     IEnumerator RollRock()
@@ -106,6 +113,10 @@ public class TombIntro : MonoBehaviour
                 StartParticles(rockSeamDust);
             }
 
+            // Subtle grinding rumble that builds with the rock's momentum
+            float momentum = Mathf.Clamp01(tCurve);
+            GamepadRumble.Set(momentum * 0.14f, momentum * 0.05f);
+
             yield return null;
         }
 
@@ -113,6 +124,22 @@ public class TombIntro : MonoBehaviour
         rockPivot.localRotation = endLocalRot;
 
         StopParticles(rockSeamDust);
+        GamepadRumble.Stop();
+    }
+
+    // Sharp thud followed by a quick fade to nothing
+    IEnumerator RumbleThud(float peakLow, float peakHigh, float fadeDuration)
+    {
+        GamepadRumble.Set(peakLow, peakHigh);
+        float elapsed = 0f;
+        while (elapsed < fadeDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t  = elapsed / fadeDuration;
+            GamepadRumble.Set(Mathf.Lerp(peakLow, 0f, t), Mathf.Lerp(peakHigh, 0f, t));
+            yield return null;
+        }
+        GamepadRumble.Stop();
     }
 
     IEnumerator Fade(CanvasGroup cg, float from, float to, float duration)

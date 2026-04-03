@@ -50,6 +50,11 @@ public class OilSink : MonoBehaviour
     Quaternion _bodyRestRot;
     Vector3    _bodyRestPos, _bodyRestScale;
 
+    void OnDestroy()
+    {
+        GamepadRumble.Stop();
+    }
+
     void OnTriggerEnter(Collider other)
     {
         if (_triggered) return;
@@ -73,6 +78,8 @@ public class OilSink : MonoBehaviour
         yield return new WaitForSeconds(0.08f);
         PlaySound(screamSFX);
 
+        // ── Panic phase ──────────────────────────────────────────────────
+        // Frantic irregular rumble — low motor churns, high motor flickers with the wing flaps
         float t = 0f;
         while (t < panicDuration)
         {
@@ -132,9 +139,15 @@ public class OilSink : MonoBehaviour
                     Time.deltaTime * 7f);
             }
 
+            // Rumble flickers with the wing beat frequency for a desperate flapping feel
+            float wingFlicker = (Mathf.Sin(t * panicWingSpeed) + 1f) * 0.5f;
+            GamepadRumble.Set(0.38f, wingFlicker * 0.30f);
+
             yield return null;
         }
 
+        // ── Exhaustion phase ─────────────────────────────────────────────
+        // Rumble fades from panic level down to nothing as the chicken gives up
         t = 0f;
         while (t < exhaustionDuration)
         {
@@ -209,13 +222,19 @@ public class OilSink : MonoBehaviour
                     body.localRotation, _bodyRestRot, Time.deltaTime * 2.5f);
             }
 
+            GamepadRumble.Set(0.38f * energy, 0.20f * energy);
+
             yield return null;
         }
+
+        GamepadRumble.Stop();
 
         PlaySound(finalGulpSFX);
 
         StartCoroutine(FadeToBlack());
 
+        // ── Submerge phase ───────────────────────────────────────────────
+        // Silent — the chicken is gone, no more feedback
         t = 0f;
         while (t < submergeDuration)
         {

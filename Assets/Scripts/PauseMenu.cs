@@ -1,18 +1,20 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 public class PauseMenu : MonoBehaviour
 {
     [SerializeField] private GameObject pausePanel;
-
     [SerializeField] private string mainMenuSceneName = "MainMenu";
-
     [SerializeField] private KeyCode toggleKey = KeyCode.Escape;
-
     [SerializeField] private MonoBehaviour[] disableWhilePaused;
+    [SerializeField] private GamepadInput gamepadInput;
 
     private bool isPaused;
+    private Button[] _menuButtons;
+    private int _selectedIndex = 0;
 
     private readonly List<AudioSource> audioSources = new();
     private readonly Dictionary<AudioSource, bool> audioWasPlaying = new();
@@ -26,17 +28,38 @@ public class PauseMenu : MonoBehaviour
     void Awake()
     {
         if (pausePanel) pausePanel.SetActive(false);
-
         CachePausables();
         SetPaused(false);
     }
 
     void Update()
     {
-        if (Input.GetKeyDown(toggleKey))
+        bool togglePressed = Input.GetKeyDown(toggleKey);
+        if (gamepadInput != null && gamepadInput.startPressed)
+            togglePressed = true;
+
+        if (togglePressed)
         {
             if (isPaused) Resume();
             else Pause();
+        }
+
+        if (isPaused && gamepadInput != null && _menuButtons != null && _menuButtons.Length > 1)
+        {
+            if (gamepadInput.dpadDown)
+            {
+                _selectedIndex = (_selectedIndex + 1) % _menuButtons.Length;
+                EventSystem.current.SetSelectedGameObject(_menuButtons[_selectedIndex].gameObject);
+            }
+            if (gamepadInput.dpadUp)
+            {
+                _selectedIndex = (_selectedIndex - 1 + _menuButtons.Length) % _menuButtons.Length;
+                EventSystem.current.SetSelectedGameObject(_menuButtons[_selectedIndex].gameObject);
+            }
+            if (gamepadInput.jumpPressed)
+            {
+                _menuButtons[_selectedIndex].onClick.Invoke();
+            }
         }
     }
 
@@ -57,28 +80,19 @@ public class PauseMenu : MonoBehaviour
         animators.AddRange(FindObjectsByType<Animator>(FindObjectsInactive.Include, FindObjectsSortMode.None));
     }
 
-    public void Pause()
-    {
-        SetPaused(true);
-    }
-
-    public void Resume()
-    {
-        SetPaused(false);
-    }
+    public void Pause()   { SetPaused(true);  }
+    public void Resume()  { SetPaused(false); }
 
     private void SetPaused(bool paused)
     {
         isPaused = paused;
 
         if (disableWhilePaused != null)
-        {
             foreach (var b in disableWhilePaused)
             {
                 if (!b) continue;
                 b.enabled = !paused;
             }
-        }
 
         if (pausePanel) pausePanel.SetActive(paused);
 
@@ -86,6 +100,11 @@ public class PauseMenu : MonoBehaviour
 
         if (paused)
         {
+            _menuButtons   = pausePanel ? pausePanel.GetComponentsInChildren<Button>() : null;
+            _selectedIndex = 0;
+            if (_menuButtons != null && _menuButtons.Length > 0 && EventSystem.current)
+                EventSystem.current.SetSelectedGameObject(_menuButtons[0].gameObject);
+
             audioWasPlaying.Clear();
             foreach (var a in audioSources)
             {
@@ -112,6 +131,9 @@ public class PauseMenu : MonoBehaviour
         }
         else
         {
+            if (EventSystem.current)
+                EventSystem.current.SetSelectedGameObject(null);
+
             foreach (var kv in audioWasPlaying)
             {
                 if (!kv.Key) continue;
@@ -135,14 +157,12 @@ public class PauseMenu : MonoBehaviour
     public void GoToMainMenu()
     {
         Time.timeScale = 1f;
-
         SceneManager.LoadScene(mainMenuSceneName);
     }
 
     public void QuitGame()
     {
         Time.timeScale = 1f;
-
 #if UNITY_EDITOR
         UnityEditor.EditorApplication.isPlaying = false;
 #else

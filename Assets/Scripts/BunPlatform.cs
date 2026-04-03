@@ -43,6 +43,9 @@ public class BunPlatform : MonoBehaviour
 
         PlaySound();
 
+        // Impact — high-frequency buzz captures the springy boing feel
+        GamepadRumble.Set(0.2f, 0.75f);
+
         float elapsed = 0f;
         while (elapsed < squishDuration)
         {
@@ -62,6 +65,7 @@ public class BunPlatform : MonoBehaviour
         if (chick != null)
             chick.ApplyBounce(bounceForce);
 
+        // Fade rumble out over the spring recovery
         elapsed = 0f;
         while (elapsed < springDuration)
         {
@@ -78,10 +82,16 @@ public class BunPlatform : MonoBehaviour
                 : Mathf.Lerp(1f,            1f / Mathf.Max(stretchOvershoot - 0.08f, 0.9f), curveY - 1f);
 
             SetScale(scaleXZ, scaleY);
+
+            // Rumble fades as the bun settles
+            float rumble = Mathf.Lerp(0.65f, 0f, t);
+            GamepadRumble.Set(rumble * 0.25f, rumble);
+
             yield return null;
         }
 
         transform.localScale = _restScale;
+        GamepadRumble.Stop();
         _isBouncing          = false;
     }
 

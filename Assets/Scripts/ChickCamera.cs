@@ -4,12 +4,20 @@ public class ChickCamera : MonoBehaviour
 {
     public Transform target;
 
+    // Assign the GamepadInput component in the Inspector for controller support.
+    // If left empty the camera still works fine with mouse.
+    public GamepadInput gamepadInput;
+
     public Vector3 targetOffset = new Vector3(0f, 1f, 0f);
 
     public float distance    = 6f;
     public float heightOffset = 1.5f;
     public float mouseSensitivityX = 3f;
     public float mouseSensitivityY = 2f;
+
+    // Right stick sensitivity — can be tuned independently from the mouse
+    public float rightStickSensitivityX = 120f;  // degrees per second
+    public float rightStickSensitivityY =  80f;
 
     public float minPitch = -20f;
     public float maxPitch =  60f;
@@ -50,9 +58,18 @@ public class ChickCamera : MonoBehaviour
 
     void HandleInput()
     {
+        // Mouse look
         _yaw   += Input.GetAxis("Mouse X") * mouseSensitivityX;
         _pitch -= Input.GetAxis("Mouse Y") * mouseSensitivityY;
-        _pitch  = Mathf.Clamp(_pitch, minPitch, maxPitch);
+
+        // Right stick look — sensitivity is in degrees/sec so it feels consistent regardless of frame rate
+        if (gamepadInput != null && gamepadInput.rightStick.magnitude > 0.1f)
+        {
+            _yaw   += gamepadInput.rightStick.x *  rightStickSensitivityX * Time.deltaTime;
+            _pitch -= gamepadInput.rightStick.y *  rightStickSensitivityY * Time.deltaTime;
+        }
+
+        _pitch = Mathf.Clamp(_pitch, minPitch, maxPitch);
 
         if (Input.GetKeyDown(KeyCode.Escape))
         {

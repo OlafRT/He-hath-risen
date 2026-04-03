@@ -19,12 +19,16 @@ public class SpikeKill : MonoBehaviour
     public AudioClip   impaleSFX;
     public AudioClip   sadSFX;
  
-
     static bool s_dead;
 
     void Awake()
     {
         s_dead = false;
+    }
+
+    void OnDestroy()
+    {
+        GamepadRumble.Stop();
     }
  
     void OnTriggerEnter(Collider other)
@@ -70,8 +74,12 @@ public class SpikeKill : MonoBehaviour
 
         PlaySound(impaleSFX);
 
+        // Sharp impalement hit — strong both motors for that sudden impact
+        GamepadRumble.Set(0.9f, 0.65f);
+
         float thisSlideDist = slideDistance + Random.Range(0f, slideRandomRange);
 
+        // Rumble fades as the chick slides down the spike
         float elapsed = 0f;
         while (elapsed < slideDuration)
         {
@@ -87,8 +95,12 @@ public class SpikeKill : MonoBehaviour
             victim.transform.position = tipNow - currentBodyOffset + dirNow * (thisSlideDist * t);
             victim.transform.rotation = rotNow;
 
+            GamepadRumble.Set(Mathf.Lerp(0.9f, 0f, t), Mathf.Lerp(0.65f, 0f, t));
+
             yield return null;
         }
+
+        GamepadRumble.Stop();
 
         {
             Vector3    tipFinal = transform.position;

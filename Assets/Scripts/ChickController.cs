@@ -1,11 +1,16 @@
 using System.Collections;
 using UnityEngine;
+using UniSense;
 
 [RequireComponent(typeof(CharacterController))]
 public class ChickController : MonoBehaviour
 {
 
     public ChickCamera chickCamera;
+
+    // Assign the GamepadInput component in the Inspector for controller support.
+    // If left empty the game still works fine with keyboard/mouse.
+    public GamepadInput gamepadInput;
 
     public Transform body;
     public Transform rightLeg;
@@ -81,11 +86,20 @@ public class ChickController : MonoBehaviour
     float _prevRightLegSin;
     float _prevLeftLegSin;
 
+    // How long each footstep pulse lasts on the trigger (seconds)
+    const float StepPulseDuration = 0.07f;
+    float _triggerStepTimer;
+
     Vector3    _bodyRestPos;
     Vector3    _bodyRestScale;
     Quaternion _rightLegRest, _leftLegRest;
     Quaternion _rightWingRest, _leftWingRest;
     Quaternion _headRest;
+
+    // Cached input read once per frame and shared between HandleMovement / HandleAnimation
+    float _inputH;
+    float _inputV;
+    bool  _inputSprint;
 
     void Start()
     {
@@ -103,9 +117,105 @@ public class ChickController : MonoBehaviour
     {
         if (_isDead && !_isFallDying) return;
         if (_isFallDying) { ContinueFalling(); return; }
+        GatherInput();
         GatherGroundState();
         HandleMovement();
         HandleAnimation();
+        UpdateTriggerFeedback();
+    }
+
+    void OnDisable()
+    {
+        // Reset trigger resistance so it doesn't stay on when the script is disabled
+        var dualSense = DualSenseGamepadHID.FindCurrent();
+        dualSense?.SetGamepadState(new DualSenseGamepadState
+        {
+            RightTrigger = new DualSenseTriggerState { EffectType = DualSenseTriggerEffectType.NoResistance },
+            LeftTrigger  = new DualSenseTriggerState { EffectType = DualSenseTriggerEffectType.NoResistance }
+        });
+    }
+
+    // Read all input once per frame so HandleMovement and HandleAnimation share the same values.
+    void GatherInput()
+    {
+        if (_inputLocked)
+        {
+            _inputH      = 0f;
+            _inputV      = 0f;
+            _inputSprint = false;
+            return;
+        }
+
+        // Keyboard baseline
+        _inputH      = Input.GetAxis("Horizontal");
+        _inputV      = Input.GetAxis("Vertical");
+        _inputSprint = Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift);
+
+        // Gamepad override — left stick takes over when it has meaningful input
+        if (gamepadInput != null && gamepadInput.leftStick.magnitude > 0.15f)
+        {
+            _inputH = gamepadInput.leftStick.x;
+            _inputV = gamepadInput.leftStick.y;
+        }
+
+        // Sprint: R2 / Right Trigger on gamepad
+        if (gamepadInput != null && gamepadInput.rightTrigger)
+            _inputSprint = true;
+    }
+
+    // Sends the right trigger state to the DualSense every frame.
+    // Three states:
+    //   - Not sprinting                  -> no resistance
+    //   - Sprinting, step pulse active   -> strong brief resistance (the footstep thump)
+    //   - Sprinting, no pulse            -> light base resistance so holding R2 always feels weighted
+    void UpdateTriggerFeedback()
+    {
+        var dualSense = DualSenseGamepadHID.FindCurrent();
+        if (dualSense == null) return;
+
+        if (_triggerStepTimer > 0f)
+            _triggerStepTimer -= Time.deltaTime;
+
+        byte force;
+        DualSenseTriggerEffectType effectType;
+
+        if (_inputSprint && _isGrounded && _triggerStepTimer > 0f)
+        {
+            // Footstep impact — strong pulse
+            effectType = DualSenseTriggerEffectType.ContinuousResistance;
+            force      = 220;
+        }
+        else if (_inputSprint)
+        {
+            // Holding sprint — light continuous resistance
+            effectType = DualSenseTriggerEffectType.ContinuousResistance;
+            force      = 140;
+        }
+        else
+        {
+            // Not sprinting — no resistance
+            effectType = DualSenseTriggerEffectType.NoResistance;
+            force      = 0;
+        }
+
+        dualSense.SetGamepadState(new DualSenseGamepadState
+        {
+            // Always bundle current motor values — the DualSense zeros anything not included in the report
+            Motor        = new DualSenseMotorSpeed(GamepadRumble.CurrentLow, GamepadRumble.CurrentHigh),
+            RightTrigger = new DualSenseTriggerState
+            {
+                EffectType = effectType,
+                Continuous = new DualSenseContinuousResistanceProperties
+                {
+                    Force         = force,
+                    StartPosition = (byte)55
+                }
+            },
+            LeftTrigger = new DualSenseTriggerState
+            {
+                EffectType = DualSenseTriggerEffectType.NoResistance
+            }
+        });
     }
 
     void GatherGroundState()
@@ -122,10 +232,10 @@ public class ChickController : MonoBehaviour
 
     void HandleMovement()
     {
-        float h = _inputLocked ? 0f : Input.GetAxis("Horizontal");
-        float v = _inputLocked ? 0f : Input.GetAxis("Vertical");
-        bool  sprinting = !_inputLocked && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
-        float speed     = sprinting ? sprintSpeed : walkSpeed;
+        float h        = _inputH;
+        float v        = _inputV;
+        bool sprinting = _inputSprint;
+        float speed    = sprinting ? sprintSpeed : walkSpeed;
 
         Vector3 camForward = chickCamera
             ? chickCamera.GetCameraForward()
@@ -160,7 +270,11 @@ public class ChickController : MonoBehaviour
             _cc.Move(moveDir * speed * Time.deltaTime);
         }
 
-        if (!_inputLocked && Input.GetKeyDown(KeyCode.Space) && _isGrounded)
+        // Jump — Space (keyboard) or Cross / A button (gamepad)
+        bool jumpInput = Input.GetKeyDown(KeyCode.Space)
+                      || (gamepadInput != null && gamepadInput.jumpPressed);
+
+        if (!_inputLocked && jumpInput && _isGrounded)
         {
             _velocity.y    = Mathf.Sqrt(jumpForce * -2f * gravity);
             _wingJumpTimer = wingJumpDuration;
@@ -177,9 +291,9 @@ public class ChickController : MonoBehaviour
 
     void HandleAnimation()
     {
-        float h = _inputLocked ? 0f : Input.GetAxis("Horizontal");
-        float v = _inputLocked ? 0f : Input.GetAxis("Vertical");
-        bool  sprinting  = !_inputLocked && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
+        float h          = _inputH;
+        float v          = _inputV;
+        bool  sprinting  = _inputSprint;
         float inputMag   = new Vector2(h, v).magnitude;
         bool  isMoving   = inputMag > 0.1f;
         bool  isFalling  = !_isGrounded && _velocity.y < -1.5f;
@@ -229,42 +343,47 @@ public class ChickController : MonoBehaviour
         }
         else
         {
-            rightLeg.localRotation = Quaternion.Slerp(rightLeg.localRotation, _rightLegRest, Time.deltaTime * 10f);
-            leftLeg.localRotation  = Quaternion.Slerp(leftLeg.localRotation,  _leftLegRest,  Time.deltaTime * 10f);
+            rightLeg.localRotation = Quaternion.Slerp(rightLeg.localRotation, _rightLegRest, Time.deltaTime * 8f);
+            leftLeg.localRotation  = Quaternion.Slerp(leftLeg.localRotation,  _leftLegRest,  Time.deltaTime * 8f);
         }
     }
 
     void CheckFootsteps(bool isMoving, bool sprinting)
     {
         if (!isMoving || !_isGrounded) return;
+        if (footstepSFX == null || footstepSFX.Length == 0) return;
+        if (!footstepSource) return;
 
-        float rSin = Mathf.Sin(_legTimer);
-        float lSin = Mathf.Sin(_legTimer + Mathf.PI);
+        float rightSin = Mathf.Sin(_legTimer);
+        float leftSin  = Mathf.Sin(_legTimer + Mathf.PI);
 
-        if (_prevRightLegSin > 0f && rSin <= 0f)
-            OnFootstep(sprinting, side: 1f);
+        bool rightStep = _prevRightLegSin < 0f && rightSin >= 0f;
+        bool leftStep  = _prevLeftLegSin  < 0f && leftSin  >= 0f;
 
-        if (_prevLeftLegSin > 0f && lSin <= 0f)
-            OnFootstep(sprinting, side: -1f);
+        if (rightStep) StampFootprint( footprintSideOffset);
+        if (leftStep)  StampFootprint(-footprintSideOffset);
 
-        _prevRightLegSin = rSin;
-        _prevLeftLegSin  = lSin;
-    }
-
-    void OnFootstep(bool sprinting, float side)
-    {
-        if (footstepSource != null && footstepSFX != null && footstepSFX.Length > 0)
+        if (rightStep || leftStep)
         {
-            AudioClip clip = footstepSFX[Random.Range(0, footstepSFX.Length)];
             float vol = sprinting ? sprintFootstepVolume : footstepVolume;
-            footstepSource.PlayOneShot(clip, vol);
+            footstepSource.PlayOneShot(footstepSFX[Random.Range(0, footstepSFX.Length)], vol);
+
+            // Trigger pulse — only while sprinting on the ground
+            if (sprinting)
+                _triggerStepTimer = StepPulseDuration;
         }
 
-        if (footprintPrefab == null) return;
+        _prevRightLegSin = rightSin;
+        _prevLeftLegSin  = leftSin;
+    }
+
+    void StampFootprint(float side)
+    {
+        if (!footprintPrefab) return;
 
         Vector3 rayOrigin = transform.position
-                          + transform.right * (side * footprintSideOffset)
-                          + Vector3.up * 0.5f;
+            + transform.right * side
+            + Vector3.up * 0.5f;
 
         if (Physics.Raycast(rayOrigin, Vector3.down, out RaycastHit hit, 2f, groundLayerMask))
         {
