@@ -86,9 +86,7 @@ public class ChickController : MonoBehaviour
     float _prevRightLegSin;
     float _prevLeftLegSin;
 
-    // How long each footstep pulse lasts on the trigger (seconds)
-    const float StepPulseDuration = 0.07f;
-    float _triggerStepTimer;
+    bool _wasSprinting;
 
     Vector3    _bodyRestPos;
     Vector3    _bodyRestScale;
@@ -173,41 +171,20 @@ public class ChickController : MonoBehaviour
         var dualSense = DualSenseGamepadHID.FindCurrent();
         if (dualSense == null) return;
 
-        if (_triggerStepTimer > 0f)
-            _triggerStepTimer -= Time.deltaTime;
-
-        byte force;
-        DualSenseTriggerEffectType effectType;
-
-        if (_inputSprint && _isGrounded && _triggerStepTimer > 0f)
-        {
-            // Footstep impact — strong pulse
-            effectType = DualSenseTriggerEffectType.ContinuousResistance;
-            force      = 220;
-        }
-        else if (_inputSprint)
-        {
-            // Holding sprint — light continuous resistance
-            effectType = DualSenseTriggerEffectType.ContinuousResistance;
-            force      = 140;
-        }
-        else
-        {
-            // Not sprinting — no resistance
-            effectType = DualSenseTriggerEffectType.NoResistance;
-            force      = 0;
-        }
+        if (_inputSprint == _wasSprinting) return;
+        _wasSprinting = _inputSprint;
 
         dualSense.SetGamepadState(new DualSenseGamepadState
         {
-            // Always bundle current motor values — the DualSense zeros anything not included in the report
             Motor        = new DualSenseMotorSpeed(GamepadRumble.CurrentLow, GamepadRumble.CurrentHigh),
             RightTrigger = new DualSenseTriggerState
             {
-                EffectType = effectType,
+                EffectType = _inputSprint
+                    ? DualSenseTriggerEffectType.ContinuousResistance
+                    : DualSenseTriggerEffectType.NoResistance,
                 Continuous = new DualSenseContinuousResistanceProperties
                 {
-                    Force         = force,
+                    Force         = 60,
                     StartPosition = (byte)55
                 }
             },
@@ -367,10 +344,6 @@ public class ChickController : MonoBehaviour
         {
             float vol = sprinting ? sprintFootstepVolume : footstepVolume;
             footstepSource.PlayOneShot(footstepSFX[Random.Range(0, footstepSFX.Length)], vol);
-
-            // Trigger pulse — only while sprinting on the ground
-            if (sprinting)
-                _triggerStepTimer = StepPulseDuration;
         }
 
         _prevRightLegSin = rightSin;
